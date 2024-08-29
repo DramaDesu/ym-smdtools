@@ -13,8 +13,6 @@ target_include_directories(ym-smd-compression INTERFACE $<BUILD_INTERFACE:${CMAK
 
 target_link_libraries(ym-smd-compression PRIVATE ym-smd-io)
 
-# Make installable all libs later
-#[[
 include(GNUInstallDirs)
 
 install(TARGETS ym-smd-compression
@@ -42,4 +40,3 @@ configure_file(
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/ym-smd-compression-config.cmake"
     DESTINATION share/ym-smd-compression
 )
-]]
