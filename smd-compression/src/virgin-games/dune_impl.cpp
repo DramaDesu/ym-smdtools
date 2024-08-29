@@ -52,7 +52,7 @@ namespace
 				for (auto&& chunk : header.chunks)
 				{
 					decompress_internal(in_data + chunk.offset(), current_out_data);
-					current_out_data += chunk.size() + data_chunk_size;
+					current_out_data += chunk.size() * data_chunk_size;
 				}
 			}
 
