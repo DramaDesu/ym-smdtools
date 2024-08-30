@@ -59,6 +59,15 @@ namespace
 			return out_data;
 		}
 
+		ym::smd::decompressed_data_t decompress_with_size(const uint8_t* in_data, uint32_t in_data_size) override
+		{
+            ym::smd::decompressed_data_t out_data(in_data_size);
+
+            decompress_internal(in_data, out_data.data());
+
+            return out_data;
+		}
+
 		static void decompress_internal(const uint8_t* in_source, uint8_t* const in_destination)
 		{
             unsigned char* const destination = in_destination; // A1

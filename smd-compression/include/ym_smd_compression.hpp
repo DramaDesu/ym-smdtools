@@ -18,6 +18,7 @@ namespace ym::smd
 	public:
 		virtual ~IDataDecompressor() = default;
 		virtual decompressed_data_t decompress(const uint8_t* in_data, uint32_t in_header_offset) = 0;
+		virtual decompressed_data_t decompress_with_size(const uint8_t* in_data, uint32_t in_data_size) = 0;
 	};
 
 	supported_games_t get_supported_games();
