@@ -6,6 +6,7 @@ option(BUILD_TESTS "Build tests" ON)
 
 add_subdirectory(smd-io)
 add_subdirectory(smd-compression)
+add_subdirectory(smd-gems)
 
 if (BUILD_TESTS)
 	enable_testing()
