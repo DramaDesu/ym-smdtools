@@ -4,6 +4,8 @@
 
 #include <string>
 
+#include "ancient-games/lzss_ancient_impl.hpp"
+
 namespace 
 {
 	using namespace std::literals;
@@ -23,6 +25,10 @@ namespace ym::smd
 		if (in_games_set == VIRGIN_GAMES)
 		{
 			return 	ym::smd::virgin::create_data_decompressor();
+		}
+		if (in_games_set == ANCIENT_GAMES)
+		{
+			return 	ym::smd::ancient::create_data_decompressor();
 		}
 		return nullptr;
 	}

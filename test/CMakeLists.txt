@@ -13,3 +13,4 @@ target_link_libraries(ym-uncompression-test PRIVATE ym-smd-io)
 target_link_libraries(ym-uncompression-test PRIVATE ym-smd-compression)
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/dune_path.txt ${CMAKE_CURRENT_BINARY_DIR}/dune_path.txt COPYONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/oasis_path.txt ${CMAKE_CURRENT_BINARY_DIR}/oasis_path.txt COPYONLY)
