@@ -29,7 +29,7 @@ namespace
 			ym::smd::decompressed_data_t out_data;
 
 			data_header_t header;
-			if (auto reader = ym::smd::io::create_data_reader(in_data, in_header_offset)) [[likely]]
+			if (auto reader = ym::smd::io::create_rom_reader(in_data, in_header_offset)) [[likely]]
 			{
 				while (const std::uint16_t size = reader->read<std::uint16_t>() & 0x7FFF)
 				{
