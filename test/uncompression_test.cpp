@@ -18,7 +18,7 @@ int main()
 	if (std::getline(file, path))
 	{
 		std::vector<std::uint8_t> rom;
-		if (ym::smd::io::load_data(path.c_str(), rom))
+		if (ym::smd::io::read_data(path.c_str(), rom))
 		{
 			using namespace std::literals;
 			if (auto decompressor = ym::smd::create_data_decompressor("virgin"sv))
