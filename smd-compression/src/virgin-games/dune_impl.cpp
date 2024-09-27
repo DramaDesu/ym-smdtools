@@ -24,7 +24,7 @@ namespace
 			std::vector<data_header_chunk_t> chunks;
 		};
 
-		ym::smd::decompressed_data_t decompress(const uint8_t* in_data, uint32_t in_header_offset) override
+		ym::smd::decompressed_data_t decompress(ym::smd::io::data_span_t in_data, uint32_t in_header_offset) override
 		{
 			ym::smd::decompressed_data_t out_data;
 
@@ -51,7 +51,7 @@ namespace
 				auto current_out_data = out_data.data();
 				for (auto&& chunk : header.chunks)
 				{
-					decompress_internal(in_data + chunk.offset(), current_out_data);
+					decompress_internal(in_data->data() + chunk.offset(), current_out_data);
 					current_out_data += chunk.size() * data_chunk_size;
 				}
 			}
@@ -59,11 +59,11 @@ namespace
 			return out_data;
 		}
 
-		ym::smd::decompressed_data_t decompress_with_size(const uint8_t* in_data, uint32_t in_data_size) override
+		ym::smd::decompressed_data_t decompress_with_size(ym::smd::io::data_span_t in_data, uint32_t in_offset, uint32_t in_data_size) override
 		{
             ym::smd::decompressed_data_t out_data(in_data_size);
 
-            decompress_internal(in_data, out_data.data());
+            decompress_internal(in_data->data() + in_offset, out_data.data());
 
             return out_data;
 		}

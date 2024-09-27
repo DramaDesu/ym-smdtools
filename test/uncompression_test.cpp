@@ -17,13 +17,12 @@ int main()
 	std::string path;
 	if (std::getline(file, path))
 	{
-		std::vector<std::uint8_t> rom;
-		if (ym::smd::io::read_data(path.c_str(), rom))
+		if (auto&& rom = ym::smd::io::read_data(path.c_str()))
 		{
 			using namespace std::literals;
 			if (auto decompressor = ym::smd::create_data_decompressor("virgin"sv))
 			{
-				if (auto result = decompressor->decompress(rom.data(), houses_header); !result.empty())
+				if (auto result = decompressor->decompress(rom, houses_header); !result.empty())
 				{
 					if (auto target = std::ofstream("decompressed.bin", std::ios::out | std::ios::binary | std::ios::trunc))
 					{

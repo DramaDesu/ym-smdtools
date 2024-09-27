@@ -5,6 +5,8 @@
 #include <string_view>
 #include <vector>
 
+#include "ym_smd_io.hpp"
+
 namespace ym::smd
 {
 	class IDataDecompressor;
@@ -17,8 +19,8 @@ namespace ym::smd
 	{
 	public:
 		virtual ~IDataDecompressor() = default;
-		virtual decompressed_data_t decompress(const uint8_t* in_data, uint32_t in_header_offset) = 0;
-		virtual decompressed_data_t decompress_with_size(const uint8_t* in_data, uint32_t in_data_size) = 0;
+		virtual decompressed_data_t decompress(io::data_span_t in_data, uint32_t in_header_offset) = 0;
+		virtual decompressed_data_t decompress_with_size(io::data_span_t in_data, uint32_t in_offset, uint32_t in_data_size) = 0;
 	};
 
 	supported_games_t get_supported_games();
