@@ -12,3 +12,6 @@ _deps
 CMakeUserPresets.json
 .vs
 out
+build/
+test/dune_path.txt
+test/oasis_path.txt

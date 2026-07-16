@@ -1,16 +1,13 @@
-﻿cmake_minimum_required (VERSION 3.8)
+add_executable(ym-smd-unit-tests unit_tests.cpp)
+target_link_libraries(ym-smd-unit-tests PRIVATE ym-smd)
+# The round-trip test drives the internal LZSS compressor directly.
+target_include_directories(ym-smd-unit-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../smd/src)
 
-project ("ym-uncompression-test")
+add_test(NAME unit COMMAND ym-smd-unit-tests)
 
-set(CMAKE_BUILD_TYPE Debug)
+add_executable(ym-smd-rom-tests rom_tests.cpp)
+target_link_libraries(ym-smd-rom-tests PRIVATE ym-smd)
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-add_executable(ym-uncompression-test "uncompression_test.cpp")
-
-target_link_libraries(ym-uncompression-test PRIVATE ym-smd-io)
-target_link_libraries(ym-uncompression-test PRIVATE ym-smd-compression)
-
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/dune_path.txt ${CMAKE_CURRENT_BINARY_DIR}/dune_path.txt COPYONLY)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/oasis_path.txt ${CMAKE_CURRENT_BINARY_DIR}/oasis_path.txt COPYONLY)
+add_test(NAME rom COMMAND ym-smd-rom-tests
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+set_tests_properties(rom PROPERTIES SKIP_RETURN_CODE 77)

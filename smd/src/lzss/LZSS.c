@@ -16,26 +16,37 @@
 #define MIN_RLE        14
 #define CONTROL_BITS   16
 
+// Compressor-side control-word state (compression is single-threaded).
 static int bitPos;
 static uint16_t controlWord;
-static uint16_t GetControlBit(const uint8_t** src)
-{
-    if (bitPos == 0) {
-        controlWord = **src | (*(*src + 1) << 8);
-        *src += 2;
-        bitPos = CONTROL_BITS;
-    }
-    bitPos--;
 
-    uint16_t flag = controlWord & 1;
-    controlWord >>= 1;
+// Decoder-side control-word state lives on the stack so that
+// LZSS_Decompress is reentrant and thread-safe.
+typedef struct {
+    int bitPos;
+    uint16_t controlWord;
+} BitReaderState;
+
+static uint16_t GetControlBit(BitReaderState* state, const uint8_t** src)
+{
+    if (state->bitPos == 0) {
+        state->controlWord = **src | (*(*src + 1) << 8);
+        *src += 2;
+        state->bitPos = CONTROL_BITS;
+    }
+    state->bitPos--;
+
+    uint16_t flag = state->controlWord & 1;
+    state->controlWord >>= 1;
     return flag;
 }
 
 size_t LZSS_Decompress(const uint8_t* src, uint8_t* dst, size_t max_src_size, size_t* compressed_size)
 {
+    BitReaderState bits = { 0, 0 };
+
     // src + 1 >= src_end т. к. нужно чтение 2 байт
-#define CHECK_CONTROL_BIT if (bitPos == 0 && src + 1 >= src_end) return -1;
+#define CHECK_CONTROL_BIT if (bits.bitPos == 0 && src + 1 >= src_end) return -1;
 #define CHECK_SPOS if (src >= src_end) return -1;
 #define CHECK_SPOS_2BYTES if (src + 1 >= src_end) return -1;
 #define CHECK_SPOS_3BYTES if (src + 2 >= src_end) return -1;
@@ -51,12 +62,14 @@ size_t LZSS_Decompress(const uint8_t* src, uint8_t* dst, size_t max_src_size, si
 
     CHECK_SPOS_3BYTES
     if (src[2] != 0) {
-        // Method 2
+        // Method 1
         uint8_t ctrl;
         const uint8_t* src_block_start = src_start;
 
         for (;;) {
-            CHECK_SPOS_2BYTES
+            // src_block_start may be src + 1 on chained blocks, so the
+            // bounds check must guard the bytes actually being read.
+            if (src_block_start + 1 >= src_end) return -1;
             size_t comp_size = src_block_start[0] | (src_block_start[1] << 8);
             src = src_block_start + 2;
             while (src != src_block_start + comp_size) {
@@ -87,6 +100,9 @@ size_t LZSS_Decompress(const uint8_t* src, uint8_t* dst, size_t max_src_size, si
                             }
                         }
                         else {
+                            // The size-probe pass must validate source
+                            // bounds exactly like the writing pass does.
+                            if ((size_t)(src_end - src) < length) return -1;
                             src += length;
                         }
                     }
@@ -152,7 +168,8 @@ size_t LZSS_Decompress(const uint8_t* src, uint8_t* dst, size_t max_src_size, si
             // TODO: Или нужно?
             if (src >= src_end || *src == 0) {
                 if (compressed_size != NULL) {
-                    *compressed_size = src - src_start + 1;
+                    // +1 только если байт-терминатор реально существует.
+                    *compressed_size = (size_t)(src - src_start) + (src < src_end ? 1 : 0);
                 }
                 return dpos;
             }
@@ -162,14 +179,14 @@ size_t LZSS_Decompress(const uint8_t* src, uint8_t* dst, size_t max_src_size, si
     // Method 2
     for (;;) {
         CHECK_SPOS_4BYTES
-        controlWord = src[3];
-        bitPos = 8;
+        bits.controlWord = src[3];
+        bits.bitPos = 8;
         src += 4;
 
         for (;;) {
             // bit 0 + literal
             CHECK_CONTROL_BIT
-            flag = GetControlBit(&src);
+            flag = GetControlBit(&bits, &src);
             if (flag == 0) {
                 CHECK_SPOS
                 if (dst != NULL) {
@@ -184,7 +201,7 @@ size_t LZSS_Decompress(const uint8_t* src, uint8_t* dst, size_t max_src_size, si
             // bit 1
             int lz_flag = 0;
             CHECK_CONTROL_BIT
-            flag = GetControlBit(&src);
+            flag = GetControlBit(&bits, &src);
             if (flag == 0) {
                 // bit 10. offset: 0-255
                 CHECK_SPOS
@@ -198,15 +215,15 @@ size_t LZSS_Decompress(const uint8_t* src, uint8_t* dst, size_t max_src_size, si
             else {
                 // bit 11 xxxxx
                 CHECK_CONTROL_BIT
-                offset =                 GetControlBit(&src);
+                offset =                 GetControlBit(&bits, &src);
                 CHECK_CONTROL_BIT
-                offset = (offset << 1) | GetControlBit(&src);
+                offset = (offset << 1) | GetControlBit(&bits, &src);
                 CHECK_CONTROL_BIT
-                offset = (offset << 1) | GetControlBit(&src);
+                offset = (offset << 1) | GetControlBit(&bits, &src);
                 CHECK_CONTROL_BIT
-                offset = (offset << 1) | GetControlBit(&src);
+                offset = (offset << 1) | GetControlBit(&bits, &src);
                 CHECK_CONTROL_BIT
-                offset = (offset << 1) | GetControlBit(&src);
+                offset = (offset << 1) | GetControlBit(&bits, &src);
                 CHECK_SPOS
                 offset = (offset << 8) | *src;
                 src++;
@@ -218,15 +235,15 @@ size_t LZSS_Decompress(const uint8_t* src, uint8_t* dst, size_t max_src_size, si
                     // bit 11 00000 && byte == 1
                     // RLE
                     CHECK_CONTROL_BIT
-                    flag = GetControlBit(&src);
+                    flag = GetControlBit(&bits, &src);
                     CHECK_CONTROL_BIT
-                    length =                 GetControlBit(&src);
+                    length =                 GetControlBit(&bits, &src);
                     CHECK_CONTROL_BIT
-                    length = (length << 1) | GetControlBit(&src);
+                    length = (length << 1) | GetControlBit(&bits, &src);
                     CHECK_CONTROL_BIT
-                    length = (length << 1) | GetControlBit(&src);
+                    length = (length << 1) | GetControlBit(&bits, &src);
                     CHECK_CONTROL_BIT
-                    length = (length << 1) | GetControlBit(&src);
+                    length = (length << 1) | GetControlBit(&bits, &src);
 
                     if (flag == 1) {
                         // Test: 17093C
@@ -269,26 +286,26 @@ size_t LZSS_Decompress(const uint8_t* src, uint8_t* dst, size_t max_src_size, si
             if (lz_flag) {
                 length = 2;
                 CHECK_CONTROL_BIT
-                flag = GetControlBit(&src);
+                flag = GetControlBit(&bits, &src);
                 if (flag == 0) {
                     // bit 0
                     length = 3;
                     CHECK_CONTROL_BIT
-                    flag = GetControlBit(&src);
+                    flag = GetControlBit(&bits, &src);
                     if (flag == 0) {
                         // bit 00
                         length = 4;
                         CHECK_CONTROL_BIT
-                        flag = GetControlBit(&src);
+                        flag = GetControlBit(&bits, &src);
                         if (flag == 0) {
                             // bit 000
                             length = 5;
                             CHECK_CONTROL_BIT
-                            flag = GetControlBit(&src);
+                            flag = GetControlBit(&bits, &src);
                             if (flag == 0) {
                                 // bit 0000
                                 CHECK_CONTROL_BIT
-                                flag = GetControlBit(&src);
+                                flag = GetControlBit(&bits, &src);
                                 if (flag == 0) {
                                     // bit 00000
                                     // length: 14-269
@@ -300,11 +317,11 @@ size_t LZSS_Decompress(const uint8_t* src, uint8_t* dst, size_t max_src_size, si
                                     // bit 00001 xxx
                                     // length: 6-13
                                     CHECK_CONTROL_BIT
-                                    length =                 GetControlBit(&src);
+                                    length =                 GetControlBit(&bits, &src);
                                     CHECK_CONTROL_BIT
-                                    length = (length << 1) | GetControlBit(&src);
+                                    length = (length << 1) | GetControlBit(&bits, &src);
                                     CHECK_CONTROL_BIT
-                                    length = (length << 1) | GetControlBit(&src);
+                                    length = (length << 1) | GetControlBit(&bits, &src);
                                     length += 6;
                                 }
                             }
