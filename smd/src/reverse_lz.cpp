@@ -112,9 +112,14 @@ namespace
 	{
 		const auto& bytes = rom.bytes();
 		const std::size_t base = at.value;
+		// Everything below is a judgement about the *content* at a valid
+		// address, so it reports corrupt_stream. out_of_bounds is reserved for
+		// an `at` past the end of the ROM, which the dispatcher already
+		// rejects; a probe scanning for blocks has to be able to tell "bad
+		// address" from "no block here".
 		if (base + 2 > rom.size())
 		{
-			return errc::out_of_bounds;
+			return errc::corrupt_stream;   // no room for even the length word
 		}
 		const std::size_t packed = static_cast<std::size_t>(bytes[base])
 		                         | (static_cast<std::size_t>(bytes[base + 1]) << 8);
@@ -124,7 +129,7 @@ namespace
 		// Four trailer bytes are read before any bit is consumed.
 		if (h.payload_end > rom.size() || packed < 4)
 		{
-			return errc::out_of_bounds;
+			return errc::corrupt_stream;
 		}
 		h.unpacked_size = static_cast<std::size_t>(bytes[h.payload_end - 1]) << 8
 		                | static_cast<std::size_t>(bytes[h.payload_end - 2]);

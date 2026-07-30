@@ -412,6 +412,74 @@ static void test_sized_rejects_absurd_size()
 	      == errc::output_limit);
 	CHECK(decompress(rom, 0x0_rom, static_cast<std::size_t>(-1), codec::ancient_lzss).error()
 	      == errc::output_limit);
+	CHECK(decompress(rom, 0x0_rom, static_cast<std::size_t>(-1), codec::reverse_lz).error()
+	      == errc::output_limit);
+}
+
+static void test_reverse_lz_literals()
+{
+	// Hand-built block. Layout: [packed le16][payload][init bit buffer]
+	// [init bit count][unpacked le16]; the first bits come from the trailer
+	// buffer MSB-first and refills walk down from end-5.
+	// 0xC0 = 1 (literal run) then 10 (two bits => length 2, +1 = 3).
+	const auto rom = make_rom({0x07, 0x00, 'A', 'B', 'C', 0xC0, 0x03, 0x03, 0x00});
+
+	const auto out = decompress(rom, 0x0_rom, codec::reverse_lz);
+	CHECK(out.has_value());
+	if (out)
+	{
+		CHECK(out.value().data == std::vector<std::uint8_t>({'A', 'B', 'C'}));
+		CHECK(out.value().end.value == 0x9);   // blocks chain from here
+	}
+}
+
+static void test_reverse_lz_match()
+{
+	// Literal "ABC" followed by a back-reference, which exercises the 8-bit
+	// distance field, the selector the bit reader leaves behind, and a
+	// mid-stream refill (the trailer buffer runs out part way through).
+	const auto rom = make_rom({0x08, 0x00, 0x10, 'A', 'B', 'C', 0xD0, 0x08, 0x05, 0x00});
+
+	const auto out = decompress(rom, 0x0_rom, codec::reverse_lz);
+	CHECK(out.has_value());
+	if (out)
+	{
+		CHECK(out.value().data == std::vector<std::uint8_t>({'A', 'B', 'A', 'B', 'C'}));
+		CHECK(out.value().end.value == 0xA);
+	}
+
+	// Asking for more than the stream produces zero-fills the tail, matching
+	// the other codecs' sized path.
+	const auto padded = decompress(rom, 0x0_rom, 8, codec::reverse_lz);
+	CHECK(padded.has_value());
+	if (padded)
+	{
+		CHECK(padded.value().data.size() == 8);
+		CHECK(padded.value().data[5] == 0);
+	}
+
+	// Asking for less than it produces is a contradiction, not a truncation.
+	CHECK(decompress(rom, 0x0_rom, 3, codec::reverse_lz).error() == errc::corrupt_stream);
+
+	// And the allocation cap is honoured before anything is decoded.
+	CHECK(decompress(rom, 0x0_rom, codec::reverse_lz, 4).error() == errc::output_limit);
+}
+
+static void test_reverse_lz_rejects_garbage()
+{
+	// A length word that runs past the ROM is a malformed *stream*, not a bad
+	// address: the caller's offset was perfectly valid. Probes that scan for
+	// blocks rely on telling those two apart.
+	const auto overrun = make_rom({0xFF, 0xFF, 0x00, 0x00});
+	CHECK(decompress(overrun, 0x0_rom, codec::reverse_lz).error() == errc::corrupt_stream);
+
+	// Too short to even hold the four trailer bytes.
+	const auto stub = make_rom({0x02, 0x00, 0x00, 0x00});
+	CHECK(decompress(stub, 0x0_rom, codec::reverse_lz).error() == errc::corrupt_stream);
+
+	// Past the end of the ROM, on the other hand, is out_of_bounds.
+	const auto tiny = make_rom({0x00, 0x00});
+	CHECK(decompress(tiny, 0x10_rom, codec::reverse_lz).error() == errc::out_of_bounds);
 }
 
 static void test_load_roundtrip()
@@ -443,6 +511,7 @@ static void test_names_and_result()
 {
 	CHECK(to_string(codec::virgin_lz) == "virgin_lz");
 	CHECK(to_string(codec::ancient_lzss) == "ancient_lzss");
+	CHECK(to_string(codec::reverse_lz) == "reverse_lz");
 	CHECK(to_string(errc::corrupt_stream) == "corrupt_stream");
 	CHECK(to_string(errc::file_too_large) == "file_too_large");
 
@@ -478,6 +547,9 @@ int main()
 	test_virgin_zero_offset_backref();
 	test_sized_rejects_absurd_size();
 	test_load_roundtrip();
+	test_reverse_lz_literals();
+	test_reverse_lz_match();
+	test_reverse_lz_rejects_garbage();
 	test_names_and_result();
 	test_load_errors();
 
