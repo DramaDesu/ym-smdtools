@@ -222,6 +222,12 @@ namespace ym::smd
 		/// Block-framed LZSS used by Ancient-era titles (tested on
 		/// The Story of Thor / Beyond Oasis). Self-sizing.
 		ancient_lzss,
+
+		/// Backwards bitstream LZ77 (tested on The Pirates of Dark Water).
+		/// The block is decoded from its end towards its start, output
+		/// included. Self-sizing. Named for the direction rather than a
+		/// vendor: which studio's toolchain produced it is not established.
+		reverse_lz,
 	};
 
 	/// Stable lowercase name ("virgin_lz", ...) for logs and tools.

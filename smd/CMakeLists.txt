@@ -2,6 +2,7 @@ add_library(ym-smd
     src/rom_image.cpp
     src/virgin_lz.cpp
     src/ancient_lzss.cpp
+    src/reverse_lz.cpp
     src/lzss/LZSS.c
 )
 add_library(ym-smd::ym-smd ALIAS ym-smd)

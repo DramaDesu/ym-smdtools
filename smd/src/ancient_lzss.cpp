@@ -114,6 +114,10 @@ namespace ym::smd
 		result<unpacked> virgin_decompress_chunked(const rom_image&,
 		                                           const std::vector<chunk_info>&,
 		                                           rom_offset, std::size_t);
+
+		// Implemented in reverse_lz.cpp.
+		result<unpacked> reverse_lz_decompress_stream(const rom_image&, rom_offset, std::size_t);
+		result<unpacked> reverse_lz_decompress_block(const rom_image&, rom_offset, std::size_t);
 	}
 
 	result<unpacked> decompress(const rom_image& rom, rom_offset at, codec format,
@@ -127,6 +131,7 @@ namespace ym::smd
 		{
 		case codec::virgin_lz:    return detail::virgin_decompress_stream(rom, at, max_output);
 		case codec::ancient_lzss: return lzss_decompress_stream(rom, at, max_output);
+		case codec::reverse_lz:   return detail::reverse_lz_decompress_stream(rom, at, max_output);
 		}
 		return errc::corrupt_stream;
 	}
@@ -148,6 +153,7 @@ namespace ym::smd
 		{
 		case codec::virgin_lz:    return detail::virgin_decompress_block(rom, at, unpacked_size);
 		case codec::ancient_lzss: return lzss_decompress_block(rom, at, unpacked_size);
+		case codec::reverse_lz:   return detail::reverse_lz_decompress_block(rom, at, unpacked_size);
 		}
 		return errc::corrupt_stream;
 	}

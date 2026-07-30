@@ -26,6 +26,7 @@ namespace ym::smd
 		{
 		case codec::virgin_lz:    return "virgin_lz";
 		case codec::ancient_lzss: return "ancient_lzss";
+		case codec::reverse_lz:   return "reverse_lz";
 		}
 		return "unknown";
 	}

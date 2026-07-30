@@ -2,10 +2,12 @@
 // are not available.
 //
 // ROM locations are resolved from, in order:
-//   1. environment variables YM_SMD_DUNE_ROM / YM_SMD_OASIS_ROM (full paths);
-//   2. dune_path.txt / oasis_path.txt in the working directory (one path per
-//      file, relative paths resolved against the working directory). These
-//      files are gitignored; copy the committed *.example files to create them.
+//   1. environment variables YM_SMD_DUNE_ROM / YM_SMD_OASIS_ROM /
+//      YM_SMD_PIRATES_ROM (full paths);
+//   2. dune_path.txt / oasis_path.txt / pirates_path.txt in the working
+//      directory (one path per file, relative paths resolved against the
+//      working directory). These files are gitignored; copy the committed
+//      *.example files to create them.
 //
 // When YM_SMD_DUMP_DIR is set, decompressed outputs are written there as
 // decompressed_<name>.bin for A/B comparison against other implementations.
@@ -28,6 +30,17 @@ namespace
 	// Known asset locations in the supported ROMs (reverse-engineered).
 	constexpr auto dune_houses_table = 0xA8B9A_rom;  // house-select graphics, chunked
 	constexpr auto oasis_health_ui = 0x1545C8_rom;   // HUD health graphics, single stream
+
+	// Pirates of Dark Water: the unpacker at 0x28A2 is called with a literal
+	// source address at each site, so these are simply three of those sites.
+	// Sizes are what the game itself produces — verified by breaking after the
+	// call and reading work RAM.
+	constexpr auto pirates_first  = 0x52F28_rom;
+	constexpr auto pirates_second = 0x537D6_rom;
+	constexpr auto pirates_third  = 0x53920_rom;
+	constexpr std::size_t pirates_first_size  = 5046;
+	constexpr std::size_t pirates_second_size = 630;
+	constexpr std::size_t pirates_third_size  = 4086;
 
 	int failures = 0;
 
@@ -124,6 +137,64 @@ namespace
 		}
 		return true;
 	}
+	bool test_pirates(const std::filesystem::path& rom_path)
+	{
+		auto rom = rom_image::load(rom_path);
+		if (!rom)
+		{
+			std::printf("pirates: cannot load '%s' (%.*s)\n", rom_path.string().c_str(),
+			            static_cast<int>(to_string(rom.error()).size()), to_string(rom.error()).data());
+			return false;
+		}
+
+		struct expectation
+		{
+			rom_offset  at;
+			std::size_t size;
+		};
+		const expectation blocks[] = {
+			{pirates_first,  pirates_first_size},
+			{pirates_second, pirates_second_size},
+			{pirates_third,  pirates_third_size},
+		};
+
+		for (const expectation& block : blocks)
+		{
+			const auto out = decompress(rom.value(), block.at, codec::reverse_lz);
+			CHECK(out.has_value());
+			if (!out)
+			{
+				continue;
+			}
+			// The size is the real assertion: it is what the game produced, not
+			// what this decoder decided to emit.
+			CHECK(out.value().data.size() == block.size);
+			// Blocks are stored back to back, so the reported end is the next
+			// block's start — this is what makes ROM mapping possible.
+			CHECK(out.value().end > block.at);
+			std::printf("pirates %06X: %zu bytes, stream ends at 0x%X\n",
+			            block.at.value, out.value().data.size(), out.value().end.value);
+		}
+
+		// Asking for a larger buffer than the stream fills must zero-pad rather
+		// than fail, matching the sized path of the other codecs.
+		const auto padded = decompress(rom.value(), pirates_second,
+		                               pirates_second_size + 64, codec::reverse_lz);
+		CHECK(padded.has_value());
+		if (padded)
+		{
+			CHECK(padded.value().data.size() == pirates_second_size + 64);
+			CHECK(padded.value().data[pirates_second_size] == 0);
+		}
+
+		// A source that is not a packed block at all must be rejected, not
+		// walked off the end of the ROM.
+		const auto garbage = decompress(rom.value(), 0x200_rom, codec::reverse_lz);
+		CHECK(!garbage.has_value());
+
+		dump("reverse_lz", decompress(rom.value(), pirates_first, codec::reverse_lz).value().data);
+		return true;
+	}
 }
 
 int main()
@@ -137,6 +208,10 @@ int main()
 	if (const auto oasis = find_rom("YM_SMD_OASIS_ROM", "oasis_path.txt"))
 	{
 		ran_any = test_oasis(*oasis) || ran_any;
+	}
+	if (const auto pirates = find_rom("YM_SMD_PIRATES_ROM", "pirates_path.txt"))
+	{
+		ran_any = test_pirates(*pirates) || ran_any;
 	}
 
 	if (!ran_any)
