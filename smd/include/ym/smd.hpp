@@ -228,6 +228,13 @@ namespace ym::smd
 		/// included. Self-sizing. Named for the direction rather than a
 		/// vendor: which studio's toolchain produced it is not established.
 		reverse_lz,
+
+		/// The graphics container of Warsong / Langrisser (Mega Drive): a
+		/// type word selects a nibble RLE (1) or a flag-bit bitplane pack
+		/// (2) with an optional colour remap; type-2 groups may chain.
+		/// Self-sizing. Point it at an entry of the game's resource table
+		/// (ROM 0x3BA00) and VDP-ready 4-bpp tiles come back.
+		warsong_planes,
 	};
 
 	/// Stable lowercase name ("virgin_lz", ...) for logs and tools.

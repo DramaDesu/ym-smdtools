@@ -3,6 +3,7 @@ add_library(ym-smd
     src/virgin_lz.cpp
     src/ancient_lzss.cpp
     src/reverse_lz.cpp
+    src/warsong_planes.cpp
     src/lzss/LZSS.c
 )
 add_library(ym-smd::ym-smd ALIAS ym-smd)

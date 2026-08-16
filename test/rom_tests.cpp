@@ -197,6 +197,125 @@ namespace
 	}
 }
 
+
+	// Warsong / Langrisser: the 188-entry resource table at 0x3BA00. Every
+	// entry must decode, and where the reference decoder's output is at hand
+	// (YM_SMD_WARSONG_REF = a directory of res_NNN_*.bin from
+	// tools/ws_unpack.py --all) the bytes must match it exactly.
+	constexpr auto warsong_table = 0x3BA00_rom;
+
+	bool test_warsong(const std::filesystem::path& rom_path)
+	{
+		auto rom = rom_image::load(rom_path);
+		if (!rom)
+		{
+			std::printf("warsong: cannot load '%s'\n", rom_path.string().c_str());
+			return false;
+		}
+		const rom_image& r = rom.value();
+		const char* refdir = std::getenv("YM_SMD_WARSONG_REF");
+
+		int decoded = 0, matched = 0, compared = 0;
+		std::size_t total_tiles = 0;
+		for (int i = 0; i < 1024; ++i)
+		{
+			const auto ptr = r.u32(rom_offset{warsong_table.value + static_cast<std::uint32_t>(i) * 4u});
+			if (!ptr || ptr.value() == 0 || ptr.value() >= r.size() || ptr.value() < 0x8000)
+			{
+				break;
+			}
+			const auto type = r.u16(rom_offset{ptr.value()});
+			if (!type || (type.value() != 1 && type.value() != 2))
+			{
+				continue; // #187 is a stray entry (type 0x3031), not a resource
+			}
+			// The resource's extent: up to the next table pointer above it.
+			std::uint32_t extent = static_cast<std::uint32_t>(r.size());
+			for (int j = 0; j < 1024; ++j)
+			{
+				const auto q = r.u32(rom_offset{warsong_table.value + static_cast<std::uint32_t>(j) * 4u});
+				if (!q || q.value() == 0 || q.value() >= r.size() || q.value() < 0x8000)
+				{
+					break;
+				}
+				if (q.value() > ptr.value() && q.value() < extent)
+				{
+					extent = q.value();
+				}
+			}
+			// Decode the group chain: the codec returns ONE group and points
+			// `end` at the next header; the caller -- here, us -- knows the
+			// extent, which is exactly the split the library keeps.
+			std::vector<std::uint8_t> whole;
+			rom_offset cur{ptr.value()};
+			bool ok = true;
+			for (;;)
+			{
+				const auto out = decompress(r, cur, codec::warsong_planes);
+				CHECK(out.has_value());
+				if (!out)
+				{
+					std::printf("warsong #%d @%06X: %.*s\n", i, cur.value,
+					            static_cast<int>(to_string(out.error()).size()), to_string(out.error()).data());
+					ok = false;
+					break;
+				}
+				CHECK(out.value().end > cur);
+				whole.insert(whole.end(), out.value().data.begin(), out.value().data.end());
+				cur = out.value().end;
+				if (type.value() != 2 || cur.value + 4 > extent)
+				{
+					break;
+				}
+				const auto next = r.u16(cur);
+				if (!next || next.value() != 2)
+				{
+					break;
+				}
+			}
+			if (!ok)
+			{
+				continue;
+			}
+			++decoded;
+			CHECK(!whole.empty());
+			CHECK(whole.size() % 32 == 0);
+			total_tiles += whole.size() / 32;
+
+			if (refdir != nullptr && *refdir != '\0')
+			{
+				char name[64];
+				const char* kind = type.value() == 1 ? "rle" : "planes";
+				std::snprintf(name, sizeof name, "res_%03d_%s.bin", i, kind);
+				std::filesystem::path p = std::filesystem::path(refdir) / name;
+				if (!std::filesystem::exists(p))
+				{
+					// chained groups are named "planes x2" by the reference
+					std::snprintf(name, sizeof name, "res_%03d_planes x2.bin", i);
+					p = std::filesystem::path(refdir) / name;
+				}
+				std::ifstream f(p, std::ios::binary);
+				if (f)
+				{
+					std::vector<std::uint8_t> ref((std::istreambuf_iterator<char>(f)), {});
+					++compared;
+					const bool same = ref == whole;
+					CHECK(same);
+					matched += same;
+					if (!same)
+					{
+						std::printf("warsong #%d: C++ %zu B vs ref %zu B DIFFER\n",
+						            i, whole.size(), ref.size());
+					}
+				}
+			}
+		}
+		std::printf("warsong: %d resources decoded, %zu tiles; %d/%d match the reference\n",
+		            decoded, total_tiles, matched, compared);
+		CHECK(decoded >= 187);
+		return true;
+	}
+
 int main()
 {
 	bool ran_any = false;
@@ -212,6 +331,10 @@ int main()
 	if (const auto pirates = find_rom("YM_SMD_PIRATES_ROM", "pirates_path.txt"))
 	{
 		ran_any = test_pirates(*pirates) || ran_any;
+	}
+	if (const auto warsong = find_rom("YM_SMD_WARSONG_ROM", "warsong_path.txt"))
+	{
+		ran_any = test_warsong(*warsong) || ran_any;
 	}
 
 	if (!ran_any)

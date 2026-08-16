@@ -118,6 +118,10 @@ namespace ym::smd
 		// Implemented in reverse_lz.cpp.
 		result<unpacked> reverse_lz_decompress_stream(const rom_image&, rom_offset, std::size_t);
 		result<unpacked> reverse_lz_decompress_block(const rom_image&, rom_offset, std::size_t);
+
+		// Implemented in warsong_planes.cpp.
+		result<unpacked> warsong_decompress_stream(const rom_image&, rom_offset, std::size_t);
+		result<unpacked> warsong_decompress_block(const rom_image&, rom_offset, std::size_t);
 	}
 
 	result<unpacked> decompress(const rom_image& rom, rom_offset at, codec format,
@@ -132,6 +136,7 @@ namespace ym::smd
 		case codec::virgin_lz:    return detail::virgin_decompress_stream(rom, at, max_output);
 		case codec::ancient_lzss: return lzss_decompress_stream(rom, at, max_output);
 		case codec::reverse_lz:   return detail::reverse_lz_decompress_stream(rom, at, max_output);
+		case codec::warsong_planes: return detail::warsong_decompress_stream(rom, at, max_output);
 		}
 		return errc::corrupt_stream;
 	}
@@ -154,6 +159,7 @@ namespace ym::smd
 		case codec::virgin_lz:    return detail::virgin_decompress_block(rom, at, unpacked_size);
 		case codec::ancient_lzss: return lzss_decompress_block(rom, at, unpacked_size);
 		case codec::reverse_lz:   return detail::reverse_lz_decompress_block(rom, at, unpacked_size);
+		case codec::warsong_planes: return detail::warsong_decompress_block(rom, at, unpacked_size);
 		}
 		return errc::corrupt_stream;
 	}

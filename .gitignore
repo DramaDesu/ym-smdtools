@@ -16,3 +16,5 @@ build/
 test/dune_path.txt
 test/oasis_path.txt
 test/pirates_path.txt
+test/warsong_path.txt
+build-ws/
