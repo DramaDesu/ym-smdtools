@@ -18,21 +18,33 @@
 //
 //   +0   u16   type = 2
 //   +2   u8    variant   bit 7 set -> a 16-entry colour remap follows count
-//   +3   u8    count     the row WIDTH in bytes (the copy loop's d4 = count-1),
-//                        and it also selects the plane count: 2 -> 2 planes,
-//                        otherwise (count ^ 5), so 1 -> 4 planes
+//   +3   u8    count     bytes one flag bit stands for: 1, 2 or 4 (the copy
+//                        loop's d4 = count-1). It also fixes the number of
+//                        flag bytes per band -- the game computes it as
+//                        (count == 2 ? 2 : count ^ 5), i.e. 4, 2, 1 -- so
+//                        that flags x 8 rows x count is always the 32-byte
+//                        scratch: ONE 8x8 tile per band for ANY count.
 //  [+4   16 x u8         remap: decoded nibble -> palette index]
 //   +N   u16   off       plane data starts at (address after off) + off
-//   ...  flag bytes      one per (band, plane); bit 7 first, one bit per row
-//   ...  plane data      the copied rows, `count` bytes each, in stream order
+//   ...  flag bytes      (4 / count) per band; bit 7 first, one bit per row
+//   ...  plane data      the copied runs, `count` bytes each, in stream order
 //
 // The band loop (0x550E..0x55A6) runs while the flag cursor is below the data
-// start: per plane one flag byte, then eight rows -- a 1 bit copies `count`
-// bytes from the data cursor, a 0 bit writes zeros -- into the scratch, plane
-// after plane. The interleave then reads the scratch as four plane words at
-// +0x18, +0x08, +0x10, +0x00 and roxl's them together, so a pixel's nibble is
-// (plane3 << 3) | (plane1 << 2) | (plane2 << 1) | plane0; the remap variant
-// looks that nibble up in its table. Two nibbles a byte, VDP order.
+// start: per flag byte eight bits -- a 1 bit copies `count` bytes from the
+// data cursor, a 0 bit writes `count` zeros -- appended to the scratch, flag
+// byte after flag byte, until it holds 32 bytes. The emit (0x5762..0x57C8)
+// is the SAME for every count: it reads the scratch as four plane words at
+// +0x18, +0x08, +0x10, +0x00 and roxl's them together, so for tile row y the
+// pixel nibble is (scratch[0x18+y] << 3) | (scratch[0x08+y] << 2)
+// | (scratch[0x10+y] << 1) | scratch[0x00+y], bit 7 first; the remap variant
+// looks that nibble up in its table. Two nibbles a byte, VDP order. So a
+// count-2 resource is still 4 bpp: its first flag byte fills scratch bytes
+// 0..15 (planes 0 and 2), the second bytes 16..31 (planes 1 and 3). (An
+// earlier version of this file emitted `count` tiles per band through a
+// per-plane interleave; that doubled/quadrupled every count-2/count-4
+// resource -- tileset ground #7, unit sprites #54/#109/#113/#115, the UI
+// chains -- and scrambled them. The corrected emit matches the map unit
+// icon block the game itself builds in RAM at FF1004 byte for byte.)
 //
 // A resource may CHAIN: four table entries (#1, #121, #129, #180) carry a
 // second `00 02 FF ..` header exactly where the first group's data ends, and
@@ -48,7 +60,6 @@
 // #123: 90 of 90, #127: 13 of 13, and the RLE-coded font #2: 189 of 192).
 #include "ym/smd.hpp"
 
-#include <algorithm>
 #include <cstring>
 
 namespace
@@ -202,32 +213,30 @@ namespace
 		{
 			return errc::corrupt_stream;
 		}
-		const unsigned nplanes = (count == 2) ? 2u : (count ^ 5u);
-		if (nplanes == 0 || nplanes > 4)
+		// One flag bit stands for `count` bytes; a band is as many flag bytes
+		// as fill the 32-byte scratch: 4 / count. The game's own arithmetic
+		// is (count == 2 ? 2 : count ^ 5), which is the same thing for the
+		// three widths that exist and nonsense for any other -- so any other
+		// is a corrupt header here.
+		if (count != 1 && count != 2 && count != 4)
 		{
 			return errc::corrupt_stream;
 		}
+		const unsigned flags_per_band = 4u / count;
 
 		std::size_t f = p;          // flag cursor
 		std::size_t d = data_start; // data cursor
-		std::vector<std::uint8_t> plane[4];
-		for (auto& pl : plane)
-		{
-			pl.assign(8u * count, 0);
-		}
+		std::uint8_t scratch[32];   // RAM 0xFF8F64: one 8x8 tile per band
 
 		while (f < data_start)
 		{
-			for (unsigned pi = 0; pi < 4; ++pi)
+			// Fill (0x572A..0x575E): flag byte after flag byte, each bit
+			// appending `count` bytes -- copied on a 1, zeros on a 0. A band
+			// cut short by the data start (never seen in the ROM) stays zero.
+			std::memset(scratch, 0, sizeof scratch);
+			std::size_t w = 0;
+			for (unsigned fi = 0; fi < flags_per_band && f < data_start; ++fi)
 			{
-				std::fill(plane[pi].begin(), plane[pi].end(), 0);
-			}
-			for (unsigned pi = 0; pi < nplanes; ++pi)
-			{
-				if (f >= data_start)
-				{
-					break;
-				}
 				const auto bits_r = rom.u8(rom_offset{static_cast<std::uint32_t>(f)});
 				if (!bits_r)
 				{
@@ -235,7 +244,7 @@ namespace
 				}
 				const std::uint8_t bits = bits_r.value();
 				++f;
-				for (unsigned row = 0; row < 8; ++row)
+				for (unsigned row = 0; row < 8; ++row, w += count)
 				{
 					if (bits & (0x80u >> row))
 					{
@@ -244,41 +253,39 @@ namespace
 						{
 							return errc::corrupt_stream;
 						}
-						std::memcpy(plane[pi].data() + row * count,
-						            src.value().data(), count);
+						std::memcpy(scratch + w, src.value().data(), count);
 						d += count;
 					}
 				}
 			}
-			// Interleave: `count` 8x8 tiles, column c from byte c of each row.
-			if (out.size() + 32u * count > max_output)
+			// Emit (0x5762..0x57C8): the SAME for every count. Tile row y is
+			// the four scratch bytes at +0x18 / +0x08 / +0x10 / +0x00 + y,
+			// bit 3 down to bit 0 of each pixel; bit 7 is the leftmost pixel.
+			if (out.size() + 32u > max_output)
 			{
 				return errc::output_limit;
 			}
-			for (unsigned c = 0; c < count; ++c)
+			for (unsigned y = 0; y < 8; ++y)
 			{
-				for (unsigned row = 0; row < 8; ++row)
+				const std::uint8_t b3 = scratch[0x18 + y];
+				const std::uint8_t b2 = scratch[0x08 + y];
+				const std::uint8_t b1 = scratch[0x10 + y];
+				const std::uint8_t b0 = scratch[0x00 + y];
+				std::uint8_t nibs[8];
+				for (int bit = 7; bit >= 0; --bit)
 				{
-					const std::uint8_t p0 = plane[0][row * count + c];
-					const std::uint8_t p1 = plane[1][row * count + c];
-					const std::uint8_t p2 = plane[2][row * count + c];
-					const std::uint8_t p3 = plane[3][row * count + c];
-					std::uint8_t nibs[8];
-					for (int bit = 7; bit >= 0; --bit)
+					std::uint8_t n = static_cast<std::uint8_t>(
+						(((b3 >> bit) & 1) << 3) | (((b2 >> bit) & 1) << 2)
+						| (((b1 >> bit) & 1) << 1) | ((b0 >> bit) & 1));
+					if (have_remap)
 					{
-						std::uint8_t n = static_cast<std::uint8_t>(
-							(((p3 >> bit) & 1) << 3) | (((p1 >> bit) & 1) << 2)
-							| (((p2 >> bit) & 1) << 1) | ((p0 >> bit) & 1));
-						if (have_remap)
-						{
-							n = static_cast<std::uint8_t>(remap[n] & 0xF);
-						}
-						nibs[7 - bit] = n;
+						n = static_cast<std::uint8_t>(remap[n] & 0xF);
 					}
-					for (int i = 0; i < 8; i += 2)
-					{
-						out.push_back(static_cast<std::uint8_t>((nibs[i] << 4) | nibs[i + 1]));
-					}
+					nibs[7 - bit] = n;
+				}
+				for (int i = 0; i < 8; i += 2)
+				{
+					out.push_back(static_cast<std::uint8_t>((nibs[i] << 4) | nibs[i + 1]));
 				}
 			}
 		}
